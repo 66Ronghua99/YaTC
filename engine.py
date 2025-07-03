@@ -4,21 +4,22 @@ from typing import Iterable, Optional
 
 import torch
 
-from timm.data import Mixup
-from timm.utils import accuracy
+from timm.data.mixup import Mixup
+from timm.utils.metrics import accuracy
 
 import util.misc as misc
 import util.lr_sched as lr_sched
 
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, confusion_matrix
 
-import matplotlib.pyplot as plt
-import numpy as np
+# import matplotlib.pyplot as plt
+# import numpy as np
 
 
 def pretrain_one_epoch(model: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
                     device: torch.device, epoch: int, loss_scaler,
+                    epochs: int,
                     log_writer=None,
                     model_without_ddp=None,
                     args=None):
@@ -44,7 +45,7 @@ def pretrain_one_epoch(model: torch.nn.Module,
 
         # we use a per iteration (instead of per epoch) lr scheduler
         if data_iter_step % accum_iter == 0:
-            lr_sched.adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, args)
+            lr_sched.adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, epochs, args)
 
         samples = samples.to(device, non_blocking=True)
 
@@ -115,7 +116,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
         # we use a per iteration (instead of per epoch) lr scheduler
         if data_iter_step % accum_iter == 0:
-            lr_sched.adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, args)
+            lr_sched.adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, epochs, args)
 
         samples = samples.to(device, non_blocking=True)
         targets = targets.to(device, non_blocking=True)
