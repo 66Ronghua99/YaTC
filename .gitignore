@@ -1,4 +1,7 @@
 YaTC_datasets/
-output_dir/
-yaTC_clustering_results/
+*output_dir/
+*yaTC_clustering_results/
 __pycache__/
+test*
+*.log
+*.pth

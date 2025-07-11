@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Example script for clustering YaTC dataset using MAE encoder representations
+Example script for clustering YaTC dataset using TrafficTransformer flow-level representations
 """
 
 import os
@@ -10,14 +10,14 @@ import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
 
-from rp_clustering import MAEEncoderExtractor, ClusteringPipeline, VisualizationHelper
+from rp_clustering import TrafficTransformerExtractor, ClusteringPipeline, VisualizationHelper
 from data_loader import load_all_data_as_tensor, get_dataset_info, visualize_dataset_samples
 
 
 def create_tsne_visualization(representations, true_labels, output_dir, perplexity=30, max_iter=1000):
     """Create T-SNE visualization of the representations"""
     
-    print("\n4.5. Creating T-SNE visualization of representations...")
+    print("\n4.5. Creating T-SNE visualization of TrafficTransformer representations...")
     
     # Apply T-SNE dimensionality reduction
     print(f"   Applying T-SNE (perplexity={perplexity}, max_iter={max_iter})...")
@@ -38,7 +38,7 @@ def create_tsne_visualization(representations, true_labels, output_dir, perplexi
         plt.scatter(representations_2d[mask, 0], representations_2d[mask, 1], 
                    c=[colors[i]], s=50, alpha=0.7, label=f'Class {label}')
     
-    plt.title(f'T-SNE Visualization of MAE Representations\n'
+    plt.title(f'T-SNE Visualization of TrafficTransformer Flow-Level Representations\n'
               f'(perplexity={perplexity}, iterations={max_iter})')
     plt.xlabel('t-SNE Component 1')
     plt.ylabel('t-SNE Component 2')
@@ -47,7 +47,7 @@ def create_tsne_visualization(representations, true_labels, output_dir, perplexi
     plt.tight_layout()
     
     # Save the plot
-    tsne_path = os.path.join(output_dir, "tsne_representations.png")
+    tsne_path = os.path.join(output_dir, "tsne_traffic_transformer_representations.png")
     plt.savefig(tsne_path, dpi=300, bbox_inches='tight')
     plt.show()
     
@@ -56,22 +56,21 @@ def create_tsne_visualization(representations, true_labels, output_dir, perplexi
     return representations_2d
 
 
-def run_yaTC_clustering_example():
-    """Run clustering on YaTC dataset"""
+def run_traffic_transformer_clustering_example():
+    """Run clustering on YaTC dataset using TrafficTransformer representations"""
     
     # Configuration
     dataset_path = "YaTC_datasets/USTC-TFC2016_MFR"
-    model_path = "3t1t_output_dir/checkpoint-step150000.pth"  # Replace with your model path
-    output_dir = "./testsets_yaTC_clustering_results"
-    # model_path = "pre-trained-model/YaTC_pretrained_model.pth"
-    # output_dir = "./pretrained_yaTC_clustering_results"
+    # Update these paths to your actual fine-tuned TrafficTransformer model
+    model_path = "3t1t_output_dir/finetune_model/traffic_transformer_final.pth"  # Replace with your model path
+    output_dir = "./finetune_yaTC_clustering_results"
     max_samples_per_class = 500  # Limit samples per class for faster processing
     
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
     
     print("="*60)
-    print("YaTC DATASET CLUSTERING EXAMPLE")
+    print("TRAFFIC TRANSFORMER CLUSTERING EXAMPLE")
     print("="*60)
     
     # 1. Get dataset information
@@ -95,22 +94,22 @@ def run_yaTC_clustering_example():
     print(f"   Labels shape: {labels.shape}")
     print(f"   Unique labels: {torch.unique(labels).tolist()}")
     
-    # 4. Load MAE model and extract representations
-    print("\n4. Loading MAE model and extracting representations...")
+    # 4. Load TrafficTransformer model and extract representations
+    print("\n4. Loading TrafficTransformer model and extracting flow-level representations...")
     try:
-        extractor = MAEEncoderExtractor(model_path)
-        print("   MAE model loaded successfully!")
+        extractor = TrafficTransformerExtractor(model_path)
+        print("   TrafficTransformer model loaded successfully!")
     except FileNotFoundError:
         print(f"   Model not found at {model_path}")
-        print("   Please update the model_path variable with your actual model path")
+        print("   Please update the model_path variable with your actual fine-tuned TrafficTransformer model path")
         return
     
     # Extract representations
-    representations = extractor.extract_representations(data, mask_ratio=0.0)
+    representations = extractor.extract_representations(data)
     print(f"   Representations shape: {representations.shape}")
     
     # Save representations
-    rep_path = os.path.join(output_dir, "mae_representations.npy")
+    rep_path = os.path.join(output_dir, "traffic_transformer_representations.npy")
     np.save(rep_path, representations)
     print(f"   Saved representations to: {rep_path}")
     
@@ -136,10 +135,15 @@ def run_yaTC_clustering_example():
         {
             'name': 'K-means (5 clusters)',
             'algorithm': 'kmeans',
-            'params': {'n_clusters': 10}
+            'params': {'n_clusters': 5}
         },
         {
             'name': 'K-means (10 clusters)',
+            'algorithm': 'kmeans',
+            'params': {'n_clusters': 10}
+        },
+        {
+            'name': 'K-means (20 clusters)',
             'algorithm': 'kmeans',
             'params': {'n_clusters': 20}
         },
@@ -203,7 +207,7 @@ def run_yaTC_clustering_example():
         viz_helper.plot_clusters_2d(
             representations, 
             cluster_labels, 
-            title=f"{config['name']} - YaTC Dataset",
+            title=f"{config['name']} - TrafficTransformer Flow-Level Representations",
             save_path=cluster_plot_path
         )
         
@@ -231,7 +235,7 @@ def run_yaTC_clustering_example():
     print("\n8. Saving results...")
     save_clustering_results(results, representations, labels.numpy(), output_dir)
     
-    print(f"\nClustering analysis completed! Results saved to: {output_dir}")
+    print(f"\nTrafficTransformer clustering analysis completed! Results saved to: {output_dir}")
 
 
 def analyze_clustering_vs_true_labels(results, true_labels, output_dir):
@@ -275,7 +279,7 @@ def analyze_clustering_vs_true_labels(results, true_labels, output_dir):
     
     # Plot ARI scores
     bars1 = ax1.bar(range(len(algorithms)), ari_scores, color='skyblue')
-    ax1.set_title('Adjusted Rand Score vs True Labels')
+    ax1.set_title('Adjusted Rand Score vs True Labels (TrafficTransformer)')
     ax1.set_ylabel('Adjusted Rand Score')
     ax1.set_xticks(range(len(algorithms)))
     ax1.set_xticklabels(algorithms, rotation=45, ha='right')
@@ -288,7 +292,7 @@ def analyze_clustering_vs_true_labels(results, true_labels, output_dir):
     
     # Plot NMI scores
     bars2 = ax2.bar(range(len(algorithms)), nmi_scores, color='lightcoral')
-    ax2.set_title('Normalized Mutual Information vs True Labels')
+    ax2.set_title('Normalized Mutual Information vs True Labels (TrafficTransformer)')
     ax2.set_ylabel('Normalized Mutual Information')
     ax2.set_xticks(range(len(algorithms)))
     ax2.set_xticklabels(algorithms, rotation=45, ha='right')
@@ -300,7 +304,7 @@ def analyze_clustering_vs_true_labels(results, true_labels, output_dir):
                 f'{score:.3f}', ha='center', va='bottom')
     
     plt.tight_layout()
-    comparison_path = os.path.join(output_dir, "clustering_vs_true_labels.png")
+    comparison_path = os.path.join(output_dir, "traffic_transformer_clustering_vs_true_labels.png")
     plt.savefig(comparison_path, dpi=300, bbox_inches='tight')
     plt.show()
 
@@ -321,36 +325,13 @@ def save_clustering_results(results, representations, true_labels, output_dir):
             'metrics': result['metrics'],
             'true_label_metrics': result.get('true_label_metrics', {})
         })
-    print(summary)
     
-    summary_path = os.path.join(output_dir, "clustering_summary.json")
+    summary_path = os.path.join(output_dir, "traffic_transformer_clustering_summary.json")
     with open(summary_path, 'w') as f:
         json.dump(summary, f, indent=2)
     
-    # Save detailed results
-    # detailed_results = {
-    #     'representations_shape': representations.shape,
-    #     'true_labels_shape': true_labels.shape,
-    #     'n_samples': len(true_labels),
-    #     'n_true_classes': len(np.unique(true_labels)),
-    #     'clustering_results': results
-    # }
-    
-    # detailed_path = os.path.join(output_dir, "detailed_results.json")
-    # with open(detailed_path, 'w') as f:
-    #     # Convert numpy arrays to lists for JSON serialization
-    #     json_results = []
-    #     for result in results:
-    #         json_result = result.copy()
-    #         json_result['labels'] = result['labels'].tolist()
-    #         json_results.append(json_result)
-        
-    #     detailed_results['clustering_results'] = json_results
-    #     json.dump(detailed_results, f, indent=2)
-    
-    # print(f"   Summary saved to: {summary_path}")
-    # print(f"   Detailed results saved to: {detailed_path}")
+    print(f"   Summary saved to: {summary_path}")
 
 
 if __name__ == "__main__":
-    run_yaTC_clustering_example() 
+    run_traffic_transformer_clustering_example() 

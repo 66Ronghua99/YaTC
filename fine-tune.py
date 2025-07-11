@@ -10,9 +10,9 @@ import torch
 import torch.backends.cudnn as cudnn
 from torch.utils.tensorboard import SummaryWriter
 
-import timm
+# import timm
 
-assert timm.__version__ == "0.3.2"  # version check
+# assert timm.__version__ == "0.3.2"  # version check
 from timm.models.layers import trunc_normal_
 from timm.data.mixup import Mixup
 from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
@@ -29,7 +29,7 @@ from util.misc import NativeScalerWithGradNormCount as NativeScaler
 
 import models_YaTC
 
-from engine import train_one_epoch, evaluate
+from engine import train_one_epoch, evaluate, save_final_model
 
 
 def get_args_parser():
@@ -107,9 +107,9 @@ def get_args_parser():
                         help='dataset path')
     parser.add_argument('--nb_classes', default=7, type=int,
                         help='number of the classification types')
-    parser.add_argument('--output_dir', default='',
+    parser.add_argument('--output_dir', default='./3t1t_output_dir/finetune_model',
                         help='path where to save, empty for no saving')
-    parser.add_argument('--log_dir', default='./output_dir',
+    parser.add_argument('--log_dir', default='./3t1t_output_dir/finetune_model',
                         help='path where to tensorboard log')
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
@@ -233,7 +233,7 @@ def main(args):
     )
 
     if args.finetune and not args.eval:
-        checkpoint = torch.load(args.finetune, map_location='cpu')
+        checkpoint = torch.load(args.finetune, map_location='cpu', weights_only=False)
         print("Load pre-trained checkpoint from: %s" % args.finetune)
         checkpoint_model = checkpoint['model']
         state_dict = model.state_dict()
@@ -310,7 +310,7 @@ def main(args):
             data_loader_train.sampler.set_epoch(epoch)
         train_stats = train_one_epoch(
             model, criterion, data_loader_train,
-            optimizer, device, epoch, loss_scaler,
+            optimizer, device, epoch, args.epochs, loss_scaler,
             args.clip_grad, mixup_fn,
             log_writer=log_writer,
             args=args
@@ -329,6 +329,9 @@ def main(args):
                      **{f'test_{k}': v for k, v in test_stats.items()},
                      'epoch': epoch,
                      'n_parameters': n_parameters}
+
+    # Save the final model
+    save_final_model(args, model, model_without_ddp, optimizer, loss_scaler, epoch, test_stats)
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))

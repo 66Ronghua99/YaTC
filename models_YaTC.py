@@ -70,7 +70,7 @@ class TrafficTransformer(timm.models.vision_transformer.VisionTransformer):
 
         return x
 
-    def forward_features(self, x):
+    def forward_features(self, x, attn_mask=None):
         B, C, H, W = x.shape
         x = x.reshape(B, C, 5, -1)
         for i in range(5):
@@ -91,6 +91,11 @@ class TrafficTransformer(timm.models.vision_transformer.VisionTransformer):
 
         outcome = self.fc_norm(x)
         return outcome
+
+    def forward(self, x, attn_mask=None):
+        x = self.forward_features(x, attn_mask=attn_mask)
+        # Skip forward_head since we already applied fc_norm in forward_features
+        return self.head(x)
 
 
 class MaskedAutoencoder(nn.Module):

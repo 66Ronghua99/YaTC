@@ -1,6 +1,7 @@
 import math
+import os
 import sys
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Any, Sized
 
 import torch
 
@@ -17,12 +18,12 @@ from sklearn.metrics import accuracy_score, precision_recall_fscore_support, con
 
 
 def pretrain_one_epoch(model: torch.nn.Module,
-                    data_loader: Iterable, optimizer: torch.optim.Optimizer,
+                    data_loader: Iterable[Sized], optimizer: torch.optim.Optimizer,
                     device: torch.device, epoch: int, loss_scaler,
                     epochs: int,
                     log_writer=None,
                     model_without_ddp=None,
-                    args=None):
+                    args: Optional[Any] = None):
     model.train(True)
     metric_logger = misc.MetricLogger(delimiter="  ")
     metric_logger.add_meter('steps', misc.SmoothedValue(window_size=1, fmt='{value:.0f}'))
@@ -92,10 +93,10 @@ def pretrain_one_epoch(model: torch.nn.Module,
 
 
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
-                    data_loader: Iterable, optimizer: torch.optim.Optimizer,
-                    device: torch.device, epoch: int, loss_scaler, max_norm: float = 0,
+                    data_loader: Iterable[Sized], optimizer: torch.optim.Optimizer,
+                    device: torch.device, epoch: int, epochs: int, loss_scaler, max_norm: float = 0,
                     mixup_fn: Optional[Mixup] = None, log_writer=None,
-                    args=None):
+                    args: Optional[Any] = None):
     model.train(True)
     metric_logger = misc.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', misc.SmoothedValue(window_size=1, fmt='{value:.6f}'))
@@ -162,6 +163,14 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             epoch_1000x = int((data_iter_step / len(data_loader) + epoch) * 1000)
             log_writer.add_scalar('loss', loss_value_reduce, epoch_1000x)
             log_writer.add_scalar('lr', max_lr, epoch_1000x)
+        if args.output_dir and (epoch+1)%50 == 0:
+            # Get model without DDP wrapper for saving
+            model_to_save = model.module if hasattr(model, 'module') else model
+            # Only save if we have a loss_scaler (for mixed precision training)
+            if loss_scaler is not None:
+                misc.save_model(
+                    args=args, epoch=epoch, model=model, model_without_ddp=model_to_save, optimizer=optimizer,
+                    loss_scaler=loss_scaler, name='epoch'+str(epoch+1))
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
@@ -226,3 +235,61 @@ def evaluate(data_loader, model, device):
     test_state['cm'] = cm
 
     return test_state
+
+
+def save_final_model(args, model, model_without_ddp, optimizer, loss_scaler, epoch, test_stats):
+    """
+    Save the final fine-tuned model in multiple formats for different use cases
+    
+    Args:
+        args: Training arguments
+        model: The trained model
+        model_without_ddp: Model without distributed data parallel wrapper
+        optimizer: The optimizer
+        loss_scaler: The loss scaler
+        epoch: Current epoch
+        test_stats: Test statistics
+    """
+    if args.output_dir:
+        print("Saving final fine-tuned model...")
+        
+        # Get the model without DDP wrapper
+        if model_without_ddp is not None:
+            model_to_save = model_without_ddp
+        elif hasattr(model, 'module'):
+            model_to_save = model.module
+        else:
+            model_to_save = model
+        
+        # Save full checkpoint (for resuming training)
+        final_checkpoint_path = os.path.join(args.output_dir, 'traffic_transformer_final.pth')
+        checkpoint_data = {
+            'model': model_to_save.state_dict(),
+            'optimizer': optimizer.state_dict(),
+            'epoch': epoch,
+            'args': args,
+            'test_stats': test_stats,
+        }
+        if loss_scaler is not None:
+            checkpoint_data['scaler'] = loss_scaler.state_dict()
+        
+        torch.save(checkpoint_data, final_checkpoint_path)
+        print(f"✓ Full checkpoint saved to: {final_checkpoint_path}")
+        
+        # Save just the model state dict (for inference/clustering)
+        state_dict_path = os.path.join(args.output_dir, 'traffic_transformer_state_dict.pth')
+        torch.save(model_to_save.state_dict(), state_dict_path)
+        print(f"✓ Model state dict saved to: {state_dict_path}")
+        
+        # Save model with minimal info (for easy loading)
+        minimal_path = os.path.join(args.output_dir, 'traffic_transformer_model.pth')
+        torch.save({
+            'model': model_to_save.state_dict(),
+            'epoch': epoch,
+            'test_stats': test_stats,
+        }, minimal_path)
+        print(f"✓ Minimal model saved to: {minimal_path}")
+        
+        print("Final model saved successfully!")
+        print(f"You can now use it for clustering with:")
+        print(f"python rp_clustering.py --model_path {state_dict_path} --model_type traffic_transformer --data_path <your_data_path>")

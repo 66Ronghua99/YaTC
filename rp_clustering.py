@@ -15,7 +15,7 @@ from typing import Dict, Any, Optional, Tuple
 import pickle
 import json
 
-from models_YaTC import MAE_YaTC
+from models_YaTC import MAE_YaTC, TraFormer_YaTC
 
 
 class MAEEncoderExtractor:
@@ -90,6 +90,77 @@ class MAEEncoderExtractor:
         return representations
 
 
+class TrafficTransformerExtractor:
+    """Extract flow-level representations from fine-tuned TrafficTransformer model"""
+    
+    def __init__(self, model_path: str, device: str = 'cuda' if torch.cuda.is_available() else 'cpu', num_classes: int = 20):
+        self.device = device
+        self.num_classes = num_classes
+        self.model = self._load_model(model_path)
+        
+    def _load_model(self, model_path: str) -> nn.Module:
+        """Load the trained TrafficTransformer model"""
+        # Initialize model with same parameters as training
+        model = TraFormer_YaTC(num_classes=self.num_classes)
+        
+        # Load trained weights with robust error handling
+        print(f"Loading TrafficTransformer model from: {model_path}")
+        
+        try:
+            # Try loading with weights_only=True first (PyTorch 2.6+ default)
+            checkpoint = torch.load(model_path, map_location=self.device, weights_only=True)
+            print("Successfully loaded checkpoint with weights_only=True")
+        except Exception as e:
+            print(f"Loading with weights_only=True failed: {e}")
+            try:
+                # If that fails, try with weights_only=False (for older checkpoints)
+                checkpoint = torch.load(model_path, map_location=self.device, weights_only=False)
+                print("Successfully loaded checkpoint with weights_only=False")
+            except Exception as e2:
+                print(f"Loading with weights_only=False also failed: {e2}")
+                raise RuntimeError(f"Failed to load model checkpoint: {e2}")
+        
+        # Handle different checkpoint formats
+        if isinstance(checkpoint, dict):
+            if 'model' in checkpoint:
+                model.load_state_dict(checkpoint['model'])
+                print("Loaded model state from checkpoint['model']")
+            elif 'state_dict' in checkpoint:
+                model.load_state_dict(checkpoint['state_dict'])
+                print("Loaded model state from checkpoint['state_dict']")
+            else:
+                # Assume the entire checkpoint is the state dict
+                model.load_state_dict(checkpoint)
+                print("Loaded model state from checkpoint directly")
+        else:
+            # Assume checkpoint is directly the state dict
+            model.load_state_dict(checkpoint)
+            print("Loaded model state from checkpoint directly")
+            
+        model.to(self.device)
+        model.eval()
+        return model
+    
+    def extract_representations(self, data: torch.Tensor) -> np.ndarray:
+        """
+        Extract flow-level representations from input data before final layernorm
+        
+        Args:
+            data: Input tensor of shape (N, 1, H, W)
+            
+        Returns:
+            Flow-level representations of shape (N, embed_dim)
+        """
+        with torch.no_grad():
+            # Use the forward_features method which returns representations before the head
+            representations = self.model.forward_features(data.to(self.device))
+            representations = representations.cpu().numpy()  # (N, embed_dim)
+            
+        return representations
+    
+
+
+
 class ClusteringPipeline:
     """Pipeline for unsupervised clustering with multiple algorithms"""
     
@@ -127,10 +198,11 @@ class ClusteringPipeline:
     def fit_predict(self, X: np.ndarray) -> np.ndarray:
         """Fit clustering model and return cluster labels"""
         # Scale the features
-        X_scaled = self.scaler.fit_transform(X)
+        # X_scaled = self.scaler.fit_transform(X)
         
         # Fit and predict
-        labels = self.model.fit_predict(X_scaled)
+        # labels = self.model.fit_predict(X_scaled)
+        labels = self.model.fit_predict(X)
         return labels
     
     def evaluate_clustering(self, X: np.ndarray, labels: np.ndarray) -> Dict[str, float]:
@@ -259,9 +331,12 @@ def load_data(data_path: str, max_samples_per_class: Optional[int] = None) -> to
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Unsupervised clustering using MAE encoder representations')
+    parser = argparse.ArgumentParser(description='Unsupervised clustering using MAE or TrafficTransformer representations')
     parser.add_argument('--model_path', type=str, required=True,
-                       help='Path to the trained MAE model checkpoint')
+                       help='Path to the trained model checkpoint')
+    parser.add_argument('--model_type', type=str, default='mae',
+                       choices=['mae', 'traffic_transformer'],
+                       help='Type of model to use for representation extraction')
     parser.add_argument('--data_path', type=str, required=True,
                        help='Path to the input data file (.npy or .pt) or YaTC dataset directory')
     parser.add_argument('--output_dir', type=str, default='./clustering_results',
@@ -272,7 +347,7 @@ def main():
                        choices=['kmeans', 'dbscan', 'hierarchical'],
                        help='Clustering algorithm to use')
     parser.add_argument('--mask_ratio', type=float, default=0.0,
-                       help='Masking ratio for encoder (0.0 for no masking)')
+                       help='Masking ratio for encoder (0.0 for no masking, only for MAE)')
     parser.add_argument('--batch_size', type=int, default=32,
                        help='Batch size for processing data')
     parser.add_argument('--random_state', type=int, default=42,
@@ -285,6 +360,8 @@ def main():
                        help='Save extracted representations to file')
     parser.add_argument('--max_samples_per_class', type=int, default=None,
                        help='Maximum number of samples per class (for YaTC datasets)')
+    parser.add_argument('--num_classes', type=int, default=20,
+                       help='Number of classes in the fine-tuned model (default: 20)')
     
     args = parser.parse_args()
     
@@ -300,18 +377,33 @@ def main():
     data = load_data(args.data_path, args.max_samples_per_class)
     print(f"Data shape: {data.shape}")
     
-    # Initialize encoder extractor
-    print("Loading MAE model...")
-    extractor = MAEEncoderExtractor(args.model_path, device)
+    # Initialize encoder extractor based on model type
+    if args.model_type == 'mae':
+        print("Loading MAE model...")
+        extractor = MAEEncoderExtractor(args.model_path, device)
+        
+        # Extract representations
+        print("Extracting MAE encoder representations...")
+        representations = extractor.extract_representations(data, args.mask_ratio)
+        rep_type = 'mae_encoder'
+        
+    elif args.model_type == 'traffic_transformer':
+        print("Loading TrafficTransformer model...")
+        extractor = TrafficTransformerExtractor(args.model_path, device, num_classes=args.num_classes)
+        
+        # Extract representations
+        print("Extracting TrafficTransformer flow-level representations...")
+        representations = extractor.extract_representations(data)
+        rep_type = 'traffic_transformer_flow'
+        
+    else:
+        raise ValueError(f"Unsupported model type: {args.model_type}")
     
-    # Extract representations
-    print("Extracting encoder representations...")
-    representations = extractor.extract_representations(data, args.mask_ratio)
     print(f"Representations shape: {representations.shape}")
     
     # Save representations if requested
     if args.save_representations:
-        rep_path = os.path.join(args.output_dir, 'encoder_representations.npy')
+        rep_path = os.path.join(args.output_dir, f'{rep_type}_representations.npy')
         np.save(rep_path, representations)
         print(f"Saved representations to: {rep_path}")
     
@@ -339,6 +431,7 @@ def main():
     print("\n" + "="*50)
     print("CLUSTERING RESULTS")
     print("="*50)
+    print(f"Model type: {args.model_type}")
     print(f"Algorithm: {args.algorithm}")
     print(f"Number of clusters: {len(np.unique(labels[labels != -1]))}")
     print(f"Number of noise points: {np.sum(labels == -1)}")
@@ -350,6 +443,7 @@ def main():
     
     # Save results
     results = {
+        'model_type': args.model_type,
         'algorithm': args.algorithm,
         'n_clusters': args.n_clusters,
         'labels': labels.tolist(),
