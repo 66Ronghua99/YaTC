@@ -159,6 +159,73 @@ class TrafficTransformerExtractor:
         return representations
     
 
+class ContrastiveModelExtractor:
+    """Extract contrastive representations from fine-tuned MAEContrast model"""
+    
+    def __init__(self, model_path: str, device: str = 'cuda' if torch.cuda.is_available() else 'cpu'):
+        self.device = device
+        self.model = self._load_model(model_path)
+        
+    def _load_model(self, model_path: str) -> nn.Module:
+        """Load the trained MAEContrast model"""
+        # Initialize model with same parameters as training
+        from models_YaTC import MAEContrast_YaTC
+        model = MAEContrast_YaTC()
+        
+        # Load trained weights with robust error handling
+        print(f"Loading MAEContrast model from: {model_path}")
+        
+        try:
+            # Try loading with weights_only=True first (PyTorch 2.6+ default)
+            checkpoint = torch.load(model_path, map_location=self.device, weights_only=True)
+            print("Successfully loaded checkpoint with weights_only=True")
+        except Exception as e:
+            print(f"Loading with weights_only=True failed: {e}")
+            try:
+                # If that fails, try with weights_only=False (for older checkpoints)
+                checkpoint = torch.load(model_path, map_location=self.device, weights_only=False)
+                print("Successfully loaded checkpoint with weights_only=False")
+            except Exception as e2:
+                print(f"Loading with weights_only=False also failed: {e2}")
+                raise RuntimeError(f"Failed to load model checkpoint: {e2}")
+        
+        # Handle different checkpoint formats
+        if isinstance(checkpoint, dict):
+            if 'model' in checkpoint:
+                model.load_state_dict(checkpoint['model'])
+                print("Loaded model state from checkpoint['model']")
+            elif 'state_dict' in checkpoint:
+                model.load_state_dict(checkpoint['state_dict'])
+                print("Loaded model state from checkpoint['state_dict']")
+            else:
+                # Assume the entire checkpoint is the state dict
+                model.load_state_dict(checkpoint)
+                print("Loaded model state from checkpoint directly")
+        else:
+            # Assume checkpoint is directly the state dict
+            model.load_state_dict(checkpoint)
+            print("Loaded model state from checkpoint directly")
+            
+        model.to(self.device)
+        model.eval()
+        return model
+    
+    def extract_representations(self, data: torch.Tensor) -> np.ndarray:
+        """
+        Extract contrastive representations from input data using forward_features
+        
+        Args:
+            data: Input tensor of shape (N, 1, H, W)
+            
+        Returns:
+            Contrastive representations of shape (N, embed_dim)
+        """
+        with torch.no_grad():
+            # Use the forward_features method which returns CLS token features
+            representations = self.model.forward_features(data.to(self.device))
+            representations = representations.cpu().numpy()  # (N, embed_dim)
+            
+        return representations
 
 
 class ClusteringPipeline:
@@ -256,7 +323,7 @@ class VisualizationHelper:
         
         # Plot clusters
         unique_labels = np.unique(labels)
-        colors = plt.cm.Set3(np.linspace(0, 1, len(unique_labels)))
+        colors = plt.cm.tab10(np.linspace(0, 1, len(unique_labels)))
         
         for i, label in enumerate(unique_labels):
             if label == -1:  # Noise points
@@ -285,7 +352,7 @@ class VisualizationHelper:
         
         plt.figure(figsize=(10, 6))
         bars = plt.bar(range(len(unique_labels)), counts, 
-                      color=plt.cm.Set3(np.linspace(0, 1, len(unique_labels))))
+                      color=plt.cm.tab10(np.linspace(0, 1, len(unique_labels))))
         
         # Add value labels on bars
         for bar, count in zip(bars, counts):
@@ -335,7 +402,7 @@ def main():
     parser.add_argument('--model_path', type=str, required=True,
                        help='Path to the trained model checkpoint')
     parser.add_argument('--model_type', type=str, default='mae',
-                       choices=['mae', 'traffic_transformer'],
+                       choices=['mae', 'traffic_transformer', 'contrastive'],
                        help='Type of model to use for representation extraction')
     parser.add_argument('--data_path', type=str, required=True,
                        help='Path to the input data file (.npy or .pt) or YaTC dataset directory')
@@ -395,6 +462,15 @@ def main():
         print("Extracting TrafficTransformer flow-level representations...")
         representations = extractor.extract_representations(data)
         rep_type = 'traffic_transformer_flow'
+        
+    elif args.model_type == 'contrastive':
+        print("Loading MAEContrast model...")
+        extractor = ContrastiveModelExtractor(args.model_path, device)
+        
+        # Extract representations
+        print("Extracting MAEContrast contrastive representations...")
+        representations = extractor.extract_representations(data)
+        rep_type = 'contrastive_representations'
         
     else:
         raise ValueError(f"Unsupported model type: {args.model_type}")

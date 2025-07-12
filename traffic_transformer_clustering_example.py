@@ -30,7 +30,7 @@ def create_tsne_visualization(representations, true_labels, output_dir, perplexi
     # Get unique labels and create color map
     unique_labels = np.unique(true_labels)
     # Generate colors for different labels
-    colors = plt.cm.rainbow(np.linspace(0, 1, len(unique_labels)))
+    colors = plt.cm.tab10(np.linspace(0, 1, len(unique_labels)))
     
     # Plot each class with different color
     for i, label in enumerate(unique_labels):
