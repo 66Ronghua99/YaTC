@@ -123,20 +123,34 @@ class TrafficTransformerExtractor:
         # Handle different checkpoint formats
         if isinstance(checkpoint, dict):
             if 'model' in checkpoint:
-                model.load_state_dict(checkpoint['model'])
-                print("Loaded model state from checkpoint['model']")
+                state_dict = checkpoint['model']
             elif 'state_dict' in checkpoint:
-                model.load_state_dict(checkpoint['state_dict'])
-                print("Loaded model state from checkpoint['state_dict']")
+                state_dict = checkpoint['state_dict']
             else:
-                # Assume the entire checkpoint is the state dict
-                model.load_state_dict(checkpoint)
-                print("Loaded model state from checkpoint directly")
+                state_dict = checkpoint
         else:
-            # Assume checkpoint is directly the state dict
-            model.load_state_dict(checkpoint)
-            print("Loaded model state from checkpoint directly")
-            
+            state_dict = checkpoint
+        
+        # Remove incompatible layers before loading
+        model_state_dict = model.state_dict()
+        incompatible_keys = []
+        for k in list(state_dict.keys()):
+            if k in model_state_dict:
+                if state_dict[k].shape != model_state_dict[k].shape:
+                    print(f"Removing incompatible key {k}: checkpoint shape {state_dict[k].shape} vs model shape {model_state_dict[k].shape}")
+                    incompatible_keys.append(k)
+                    del state_dict[k]
+            else:
+                print(f"Removing key not in model: {k}")
+                incompatible_keys.append(k)
+                del state_dict[k]
+        
+        # Load the compatible weights
+        msg = model.load_state_dict(state_dict, strict=False)
+        print(f"Loaded checkpoint with message: {msg}")
+        if incompatible_keys:
+            print(f"Removed incompatible keys: {incompatible_keys}")
+        
         model.to(self.device)
         model.eval()
         return model

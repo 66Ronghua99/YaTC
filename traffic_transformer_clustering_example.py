@@ -62,8 +62,9 @@ def run_traffic_transformer_clustering_example():
     # Configuration
     dataset_path = "YaTC_datasets/USTC-TFC2016_MFR"
     # Update these paths to your actual fine-tuned TrafficTransformer model
-    model_path = "3t1t_output_dir/finetune_model/traffic_transformer_final.pth"  # Replace with your model path
-    output_dir = "./finetune_yaTC_clustering_results"
+    model_path = "contrastive_output_dir/contrastive_model_epoch40.pth"  # Replace with your model path
+    # model_path = "3t1t_output_dir/finetune_model/traffic_transformer_final.pth"  # Replace with your model path
+    output_dir = "./contrastive_yaTC_clustering_results"
     max_samples_per_class = 500  # Limit samples per class for faster processing
     
     # Create output directory
